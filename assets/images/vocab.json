@@ -1,0 +1,102 @@
+[
+  {
+    "id": 1,
+    "sentence": "Having more than one meaning; unclear",
+    "options": {
+      "A": "Ambiguous",
+      "B": "Benevolent",
+      "C": "Meticulous"
+    },
+    "answer": "A"
+  },
+  {
+    "id": 2,
+    "sentence": "Kind and generous",
+    "options": {
+      "A": "Superfluous",
+      "B": "Benevolent",
+      "C": "Frivolous"
+    },
+    "answer": "B"
+  },
+  {
+    "id": 3,
+    "sentence": "Honest and straightforward",
+    "options": {
+      "A": "Candid",
+      "B": "Pragmatic",
+      "C": "Impartial"
+    },
+    "answer": "A"
+  },
+  {
+    "id": 4,
+    "sentence": "To agree",
+    "options": {
+      "A": "Concur",
+      "B": "Frivolous",
+      "C": "Ambiguous"
+    },
+    "answer": "A"
+  },
+  {
+    "id": 5,
+    "sentence": "Hardworking and careful",
+    "options": {
+      "A": "Meticulous",
+      "B": "Diligent",
+      "C": "Superfluous"
+    },
+    "answer": "B"
+  },
+  {
+    "id": 6,
+    "sentence": "Not serious or important; silly",
+    "options": {
+      "A": "Frivolous",
+      "B": "Pragmatic",
+      "C": "Candid"
+    },
+    "answer": "A"
+  },
+  {
+    "id": 7,
+    "sentence": "Fair and not biased",
+    "options": {
+      "A": "Benevolent",
+      "B": "Impartial",
+      "C": "Pragmatic"
+    },
+    "answer": "B"
+  },
+  {
+    "id": 8,
+    "sentence": "Very careful and precise",
+    "options": {
+      "A": "Ambiguous",
+      "B": "Diligent",
+      "C": "Meticulous"
+    },
+    "answer": "C"
+  },
+  {
+    "id": 9,
+    "sentence": "Dealing with things realistically; practical",
+    "options": {
+      "A": "Pragmatic",
+      "B": "Frivolous",
+      "C": "Impartial"
+    },
+    "answer": "A"
+  },
+  {
+    "id": 10,
+    "sentence": "Unnecessary; more than needed",
+    "options": {
+      "A": "Superfluous",
+      "B": "Candid",
+      "C": "Ambiguous"
+    },
+    "answer": "A"
+  }
+]

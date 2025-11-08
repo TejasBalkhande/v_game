@@ -1,11 +1,16 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flame/game.dart';
 import 'package:flame/components.dart';
 import 'package:flame/sprite.dart';
 import 'package:flame/flame.dart';
+import 'package:flame_audio/flame_audio.dart'; // Import for audio
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+
+// Global variable to hold the loaded questions
+List<Question> _loadedQuestions = [];
 
 // --- Data Structure for Quiz Questions (mcq.json) ---
 class Question {
@@ -37,124 +42,39 @@ class Question {
   String optionForLane(String key) => options[key] ?? 'Error';
 }
 
-// --- Hardcoded MCQ Data (from mcq.json) ---
-const String _mcqJson = '''
-[
-  {
-    "id": 1,
-    "sentence": "Having more than one meaning; unclear",
-    "options": {
-      "A": "Ambiguous",
-      "B": "Benevolent",
-      "C": "Meticulous"
-    },
-    "answer": "A"
-  },
-  {
-    "id": 2,
-    "sentence": "Kind and generous",
-    "options": {
-      "A": "Superfluous",
-      "B": "Benevolent",
-      "C": "Frivolous"
-    },
-    "answer": "B"
-  },
-  {
-    "id": 3,
-    "sentence": "Honest and straightforward",
-    "options": {
-      "A": "Candid",
-      "B": "Pragmatic",
-      "C": "Impartial"
-    },
-    "answer": "A"
-  },
-  {
-    "id": 4,
-    "sentence": "To agree",
-    "options": {
-      "A": "Concur",
-      "B": "Frivolous",
-      "C": "Ambiguous"
-    },
-    "answer": "A"
-  },
-  {
-    "id": 5,
-    "sentence": "Hardworking and careful",
-    "options": {
-      "A": "Meticulous",
-      "B": "Diligent",
-      "C": "Superfluous"
-    },
-    "answer": "B"
-  },
-  {
-    "id": 6,
-    "sentence": "Not serious or important; silly",
-    "options": {
-      "A": "Frivolous",
-      "B": "Pragmatic",
-      "C": "Candid"
-    },
-    "answer": "A"
-  },
-  {
-    "id": 7,
-    "sentence": "Fair and not biased",
-    "options": {
-      "A": "Benevolent",
-      "B": "Impartial",
-      "C": "Pragmatic"
-    },
-    "answer": "B"
-  },
-  {
-    "id": 8,
-    "sentence": "Very careful and precise",
-    "options": {
-      "A": "Ambiguous",
-      "B": "Diligent",
-      "C": "Meticulous"
-    },
-    "answer": "C"
-  },
-  {
-    "id": 9,
-    "sentence": "Dealing with things realistically; practical",
-    "options": {
-      "A": "Pragmatic",
-      "B": "Frivolous",
-      "C": "Impartial"
-    },
-    "answer": "A"
-  },
-  {
-    "id": 10,
-    "sentence": "Unnecessary; more than needed",
-    "options": {
-      "A": "Superfluous",
-      "B": "Candid",
-      "C": "Ambiguous"
-    },
-    "answer": "A"
-  }
-]
-''';
+// MODIFIED: Function to asynchronously load and parse questions from the asset file
+Future<List<Question>> loadQuestions() async {
+  try {
+    // 1. Load the JSON string from assets/vocab.json
+    // NOTE: This assumes you have 'assets/vocab.json' in your project's assets folder
+    final String jsonString = await rootBundle.loadString('assets/vocab.json');
 
-List<Question> parseQuestions() {
-  final List<dynamic> jsonList = jsonDecode(_mcqJson);
-  return jsonList.map((json) => Question.fromJson(json)).toList();
+    // 2. Decode the JSON string
+    final List<dynamic> jsonList = jsonDecode(jsonString);
+
+    // 3. Convert the list of JSON objects to a List<Question>
+    return jsonList.map((json) => Question.fromJson(json)).toList();
+  } catch (e) {
+    // Handle error during loading (e.g., file not found, bad format)
+    print("Error loading vocabulary questions: $e");
+    return []; // Return an empty list on failure
+  }
 }
 
 
 // --- Main Application and GameScreen ---
-void main() {
-  // Ensure the Flame engine is initialized before running the app
+Future<void> main() async {
+  // Ensure the Flutter binding is initialized for rootBundle to work
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Load the questions data before running the app
+  _loadedQuestions = await loadQuestions();
+
+  // Initialize Flame engine settings
   Flame.device.fullScreen();
-  Flame.device.setLandscape(); // Keep the portrait orientation for the game UI
+  // Ensure landscape mode is appropriate for the game layout
+  // Flame.device.setLandscape();
+
   runApp(const MyApp());
 }
 
@@ -170,13 +90,15 @@ class MyApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.black, // Dark background
         cardColor: Colors.grey[900], // Darker card background
       ),
-      home: const GameScreen(),
+      // Pass the globally loaded questions list to GameScreen
+      home: GameScreen(questions: _loadedQuestions),
     );
   }
 }
 
 class GameScreen extends StatefulWidget {
-  const GameScreen({super.key});
+  final List<Question> questions; // Accept questions as a parameter
+  const GameScreen({super.key, required this.questions});
 
   @override
   State<GameScreen> createState() => _GameScreenState();
@@ -194,12 +116,16 @@ class _GameScreenState extends State<GameScreen> {
   static const double _centerXRatio = 0.50;
   static const double _rightXRatio = 0.87;
 
+  // NEW: Coin score calculation
+  int get _coinScore => _score * 50;
+
+
   @override
   void initState() {
     super.initState();
-    final questions = parseQuestions();
+    // Use widget.questions
     _game = CharacterGame(
-      questions: questions,
+      questions: widget.questions,
       onGameOver: _showGameOver,
       onNextQuestion: _updateUI,
       onScoreChange: (score) {
@@ -208,7 +134,9 @@ class _GameScreenState extends State<GameScreen> {
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
-      _updateUI(_game.currentQuestion, 0); // Initial UI update
+      if (_game.questions.isNotEmpty) {
+        _updateUI(_game.currentQuestion, 0); // Initial UI update
+      }
     });
   }
 
@@ -216,6 +144,8 @@ class _GameScreenState extends State<GameScreen> {
   void dispose() {
     _focusNode.dispose();
     _game.pauseEngine();
+    // FIX: Replaced FlameAudio.stop() with FlameAudio.bgm.stop()
+    FlameAudio.bgm.stop(); // Ensure music stops when the widget is disposed
     super.dispose();
   }
 
@@ -244,23 +174,35 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   void _showGameOver() {
+    // Music is already stopped within CharacterGame before calling this.
+
     // Resume engine briefly for screen effect before showing dialog
     _game.resumeEngine();
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('Game Over! 💥'),
-        content: Text('You scored: $_score out of ${_game.questions.length}.\n'
-            'You collided with the **WRONG** answer.'),
+        title: const Text('Game Over!'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Assuming 'assets/images/character_snake.png' is correctly configured in pubspec.yaml
+            Image.asset('assets/images/character_snake.png', height: 100),
+            const SizedBox(height: 10),
+            // MODIFIED: Show final score and coin score
+            Text('Final Correct Answers: $_score\n'
+                'Final Coin Score: $_coinScore\n'
+                'You collided with the Snake'),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
               setState(() {
-                final questions = parseQuestions();
+                // Use widget.questions for restart
                 _game = CharacterGame(
-                  questions: questions,
+                  questions: widget.questions,
                   onGameOver: _showGameOver,
                   onNextQuestion: _updateUI,
                   onScoreChange: (score) {
@@ -271,8 +213,12 @@ class _GameScreenState extends State<GameScreen> {
                 // Re-setup is handled within the game's onLoad/setup, but we need
                 // to explicitly request the initial UI update after creating the new game instance.
                 WidgetsBinding.instance.addPostFrameCallback((_) {
-                  _updateUI(_game.currentQuestion, 0);
+                  if (_game.questions.isNotEmpty) {
+                    _updateUI(_game.currentQuestion, 0);
+                  }
                 });
+                // FIX: Start the background music again after pressing restart
+                FlameAudio.bgm.play('BG.mp3');
               });
               _focusNode.requestFocus();
             },
@@ -287,11 +233,8 @@ class _GameScreenState extends State<GameScreen> {
   @override
   Widget build(BuildContext context) {
     // Determine the actual X positions based on the AspectRatio and screen width
-    final double screenWidth = MediaQuery.of(context).size.width;
-    // Assuming the GameWidget occupies the width determined by the AspectRatio
-    // This value is not strictly needed for the Positioned widgets since we use Align
-    // but kept for context.
-    // final double gameWidth = screenWidth > 0 ? screenWidth : 10;
+    // ... (unchanged)
+    // final double screenWidth = MediaQuery.of(context).size.width;
 
     // We use Align widgets with a fractional width to center the labels relative
     // to their respective lane X positions within the game container.
@@ -301,6 +244,16 @@ class _GameScreenState extends State<GameScreen> {
 
     // Fixed vertical position for the options
     const double optionsTopPosition = 120;
+
+    // Add a check to handle the case where questions failed to load
+    if (widget.questions.isEmpty) {
+      return const Scaffold(
+        body: Center(
+          child: Text('Error: Could not load quiz questions.',
+              style: TextStyle(color: Colors.red)),
+        ),
+      );
+    }
 
     return Scaffold(
       body: RawKeyboardListener(
@@ -326,8 +279,27 @@ class _GameScreenState extends State<GameScreen> {
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text('Score: $_score/${_game.questions.length}',
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                          // NEW: Score and Coin Score Row
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text('Correct: $_score',
+                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                              const SizedBox(width: 30),
+                              // Coin Animation and Score
+                              SizedBox(
+                                width: 30, // Adjust size for coin image
+                                height: 30,
+                                // Use a Container to host the Coin Animation from Flame
+                                child: GameWidget(
+                                  game: _game.coinAnimationGame, // Pass the small CoinGame instance
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text('$_coinScore', // Display the coin score
+                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.yellowAccent)),
+                            ],
+                          ),
                           const SizedBox(height: 8),
                           Card(
                             color: Colors.grey[850],
@@ -346,7 +318,7 @@ class _GameScreenState extends State<GameScreen> {
                     ),
                   ),
 
-                  // MODIFIED: Option Label A (Left Lane)
+                  // Option Label A (Left Lane)
                   Positioned(
                     top: optionsTopPosition,
                     left: 0,
@@ -357,7 +329,7 @@ class _GameScreenState extends State<GameScreen> {
                     ),
                   ),
 
-                  // MODIFIED: Option Label B (Center Lane)
+                  // Option Label B (Center Lane)
                   Positioned(
                     top: optionsTopPosition,
                     left: 0,
@@ -368,7 +340,7 @@ class _GameScreenState extends State<GameScreen> {
                     ),
                   ),
 
-                  // MODIFIED: Option Label C (Right Lane)
+                  // Option Label C (Right Lane)
                   Positioned(
                     top: optionsTopPosition,
                     left: 0,
@@ -444,8 +416,58 @@ class _OptionLabel extends StatelessWidget {
 }
 
 
-// --- NEW Character Component for Animation ---
+// --- NEW: Coin Animation Component ---
+
+/// Component to display the spinning coin animation.
+class CoinAnimationComponent extends SpriteAnimationComponent {
+  CoinAnimationComponent() : super(size: Vector2.all(30));
+
+  // MODIFICATION START: Set paint with BlendMode to attempt transparency
+  @override
+  final paint = Paint()
+    ..filterQuality = FilterQuality.high
+  // Using BlendMode.modulate or BlendMode.srcOver often works for sprites
+  // with solid black backgrounds that should be transparent.
+    ..blendMode = BlendMode.srcOver;
+  // MODIFICATION END
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    final images = Flame.images;
+
+    // Load coin sprites from coin1.png to coin5.png
+    final List<Sprite> coinSprites = [];
+    for (int i = 1; i <= 5; i++) {
+      // NOTE: Assumes you have coin1.png, coin2.png, ... coin5.png
+      coinSprites.add(Sprite(await images.load('coin$i.png')));
+    }
+    // To complete the loop back to coin1, we use 5 frames
+    // If you have coin6.png, you can load it here. Assuming only 5 based on the prompt's list:
+    // "coin1.png, coin2.png, coin3.png, coin4.png, coin5.png"
+
+    animation = SpriteAnimation.spriteList(
+      coinSprites,
+      stepTime: 0.1, // Time between frames
+      loop: true,
+    );
+  }
+}
+
+/// A mini-game container for the CoinAnimationComponent,
+/// allowing it to be used within the Flutter Widget tree.
+class CoinAnimationGame extends FlameGame {
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    // The component is sized in the Widget tree, so we use a small default size here
+    add(CoinAnimationComponent());
+  }
+}
+
+// --- Character Component for Animation (Unchanged) ---
 class Character extends SpriteAnimationGroupComponent<CharacterState> with HasGameRef<CharacterGame> {
+  // ... (Character class implementation remains the same)
   final double speed;
   CharacterState _currentState = CharacterState.walk;
   double _animationTimeLeft = 0.0;
@@ -550,7 +572,7 @@ enum CharacterState {
 
 
 // ----------------------------------
-// --- Flame Game Classes (Updated) ---
+// --- Flame Game Classes (MODIFIED for Coin Game and Audio) ---
 // ----------------------------------
 
 class CharacterGame extends FlameGame {
@@ -558,6 +580,9 @@ class CharacterGame extends FlameGame {
   final VoidCallback onGameOver;
   final Function(Question question, int laneIndex) onNextQuestion;
   final Function(int score) onScoreChange;
+
+  // NEW: Game instance for the Coin Animation widget
+  final CoinAnimationGame coinAnimationGame = CoinAnimationGame();
 
   CharacterGame({
     required this.questions,
@@ -585,6 +610,7 @@ class CharacterGame extends FlameGame {
   bool _isGameOver = false;
   final Random _random = Random();
 
+  // MODIFIED: _currentQuestionIndex will now loop
   int _currentQuestionIndex = 0;
   int _score = 0;
   int _correctLaneIndex = 0;
@@ -595,7 +621,7 @@ class CharacterGame extends FlameGame {
 
   // NEW: Character collision window for sprite change
   // Transformation starts when bush is this far *above* the character's feet
-  static const double _bushTransformStartOffset = 150.0;
+  static const double _bushTransformStartOffset = 50.0;
   // Transformation ends when bush is this far *below* the character's feet
   static const double _bushTransformEndOffset = 0.0;
 
@@ -612,10 +638,19 @@ class CharacterGame extends FlameGame {
   Future<void> onLoad() async {
     await super.onLoad();
 
+    // NEW: Initialize the BGM manager
+    await FlameAudio.bgm.initialize();
+
+    // NEW: Load the music asset for pre-caching
+    await FlameAudio.audioCache.loadAll(['BG.mp3', 'Kill_sound.mp3']);
+
+    // Ensure the CoinAnimationGame also loads its assets
+    await coinAnimationGame.onLoad();
+
     // Load Image Assets
     final images = Flame.images;
+    // NOTE: Ensure 'assets/images/bush.png' and 'assets/images/bush_snake.png' exist
     _normalBushSprite = Sprite(await images.load('bush.png'));
-    // NEW: Load the snake bush sprite
     _snakeBushSprite = Sprite(await images.load('bush_snake.png'));
 
     bg = _ScrollingBackground(speedProvider: () => _bushSpeed);
@@ -643,6 +678,7 @@ class CharacterGame extends FlameGame {
 
     // Trees (Decorative)
     for (int i = 1; i <= 6; i++) {
+      // NOTE: Ensure 'assets/images/treeX.png' exist (X=1 to 6)
       final img = await images.load('tree$i.png');
       final treeSprite = Sprite(img);
       final bool leftSide = _random.nextBool();
@@ -676,12 +712,20 @@ class CharacterGame extends FlameGame {
     }
 
     // Initial Question setup and bush repositioning
-    _setupNextQuestion();
+    if (questions.isNotEmpty) {
+      _setupNextQuestion();
+    }
+
+    // FIX: Start the background music loop using the BGM manager
+    FlameAudio.bgm.play('BG.mp3');
   }
 
   @override
   void onGameResize(Vector2 canvasSize) {
     super.onGameResize(canvasSize);
+    // Also resize the coin game container, though it's less critical as it's small.
+    coinAnimationGame.onGameResize(Vector2.all(30));
+
     if (canvasSize.x <= 0 || canvasSize.y <= 0) return;
 
     _updatePositions(canvasSize);
@@ -694,6 +738,7 @@ class CharacterGame extends FlameGame {
   }
 
   void _updatePositions(Vector2 canvasSize) {
+    // These positions are relative to the ASPECT RATIO container
     _leftX = canvasSize.x * 0.20;
     _centerX = canvasSize.x * 0.50;
     _rightX = canvasSize.x * 0.80;
@@ -753,14 +798,17 @@ class CharacterGame extends FlameGame {
     return obj1.toRect().overlaps(obj2.toRect());
   }
 
+  // MODIFIED: Implements the infinite loop by using the modulus operator (%)
   void _setupNextQuestion() {
-    if (_currentQuestionIndex >= questions.length) {
-      // Game finished all questions
+    if (questions.isEmpty) {
       _isGameOver = true;
       pauseEngine();
-      onGameOver(); // Re-use game over dialog for completion message
+      onGameOver();
       return;
     }
+
+    // MODIFIED: Use the modulus operator to cycle the index indefinitely
+    _currentQuestionIndex = (_currentQuestionIndex) % questions.length;
 
     final question = currentQuestion;
     final answerKey = question.answerKey;
@@ -787,6 +835,9 @@ class CharacterGame extends FlameGame {
   void update(double dt) {
     super.update(dt);
     if (_isGameOver) return;
+
+    // Also update the coin game, though its internal logic is just animation
+    coinAnimationGame.update(dt);
 
     // Character lane movement
     if (character != null) {
@@ -816,7 +867,7 @@ class CharacterGame extends FlameGame {
         final bushY = bush.position.y;
         final bushHeight = bush.size.y;
 
-        // NEW: Check for sprite transformation window
+        // Check for sprite transformation window
         final isNearCharacter = bushY >= charY - _bushTransformStartOffset &&
             bushY <= charY - _bushTransformEndOffset;
 
@@ -832,17 +883,20 @@ class CharacterGame extends FlameGame {
           }
         }
 
-        // 1. **MODIFIED** Collision Check (Trigger when bush is near the character's feet)
-        // We check if the bottom of the character (charY) is overlapping the bush's Rect.
-        // Bush's bottom edge is at bushY. Bush's top edge is at bushY - bushHeight.
-        // We only check in the vertical band that is immediately around the character's feet.
-        const double collisionWindowOffset = 10.0; // Allow a small vertical overlap for collision
+        // 1. Collision Check (Trigger when bush is near the character's feet)
+        const double collisionWindowOffset = 10.0;
         if (bushY >= charY - collisionWindowOffset && bushY - bushHeight < charY) {
           if (_checkCollision(character!, bush)) {
             // Collision logic: Collision with WRONG option -> Game Over
             if (!bush.isCorrectOption) {
               _isGameOver = true;
               pauseEngine();
+              // FIX: Stop the background music on game over
+              FlameAudio.bgm.stop();
+
+              // NEW: Play the kill sound
+              FlameAudio.play('Kill_sound.mp3');
+
               onGameOver();
               return;
             }
@@ -851,7 +905,6 @@ class CharacterGame extends FlameGame {
         }
 
         // 2. Pass Through Check (Check if the bush has passed the character's line)
-        // Check if the bush's bottom edge (bushY) has passed the character's position (charY).
         if (bushY > charY && !bush.hasPassed) {
           // Bush has passed the character's y-position (bottom anchor).
 
@@ -862,6 +915,8 @@ class CharacterGame extends FlameGame {
             // If the correct bush passes, it's a win for the question.
             _score++;
             onScoreChange(_score);
+
+            // MODIFIED: Increment the index to get the next question in the loop
             _currentQuestionIndex++;
             _setupNextQuestion();
             return;
@@ -873,8 +928,8 @@ class CharacterGame extends FlameGame {
       }
 
       // 3. Off-Screen Reset (Bushes reset off-screen top once they are completely below the screen)
+      // This is a safety reset; the question logic usually handles repositioning.
       if (bush.position.y > _canvasHeight + 100) {
-        // This is a safety reset; the question logic usually handles repositioning.
         bush.position.y = -_canvasHeight;
         bush.resetState();
       }
@@ -890,7 +945,7 @@ class _ObstacleBush extends SpriteComponent {
 
   bool isCorrectOption = false;
   bool hasPassed = false;
-  bool isSnake = false; // NEW: Track if the sprite has changed
+  bool isSnake = false; // Track if the sprite has changed
 
   _ObstacleBush({
     required this.normalSprite,
@@ -899,7 +954,7 @@ class _ObstacleBush extends SpriteComponent {
     required this.bushIndex,
   }) : super(sprite: normalSprite, size: size, anchor: Anchor.bottomCenter);
 
-  // NEW: Change the sprite to the snake bush
+  // Change the sprite to the snake bush
   void turnToSnake() {
     if (!isSnake) {
       sprite = snakeSprite;
@@ -907,7 +962,7 @@ class _ObstacleBush extends SpriteComponent {
     }
   }
 
-  // NEW: Change the sprite back to the normal bush
+  // Change the sprite back to the normal bush
   void turnToNormal() {
     if (isSnake) {
       sprite = normalSprite;
@@ -915,7 +970,7 @@ class _ObstacleBush extends SpriteComponent {
     }
   }
 
-  // NEW: Reset the state for the next question
+  // Reset the state for the next question
   void resetState() {
     turnToNormal(); // Ensure it's the normal bush initially
     hasPassed = false;
@@ -957,6 +1012,7 @@ class _ScrollingBackground extends Component with HasGameRef<CharacterGame> {
   Future<void> onLoad() async {
     await super.onLoad();
     // Use gameRef.images or Flame.images
+    // NOTE: Ensure 'assets/images/bg3.png' exists
     final bgImage = await gameRef.images.load('bg3.png');
     bgSprite = Sprite(bgImage);
 

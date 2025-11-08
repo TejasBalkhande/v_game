@@ -12,6 +12,7 @@ dependencies:
     sdk: flutter
   flame: ^1.13.1
   cupertino_icons: ^1.0.8
+  flame_audio: ^2.0.0
 
 dev_dependencies:
   flutter_test:
@@ -22,44 +23,9 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/character.png
-    - assets/bush.png
-    - assets/images/character.png
-    - assets/images/bush.png
-    - assets/images/bg.png
-    - assets/bg.png
-    - assets/images/bg1.png
-    - assets/bg1.png
-    - assets/images/bg3.png
-    - assets/bg3.png
-    - assets/images/tree1.png
-    - assets/images/tree2.png
-    - assets/images/tree3.png
-    - assets/images/tree4.png
-    - assets/images/tree5.png
-    - assets/images/tree6.png
-    - assets/tree1.png
-    - assets/tree2.png
-    - assets/tree3.png
-    - assets/tree4.png
-    - assets/tree5.png
-    - assets/tree6.png
-    - assets/images/mcq.json
-    - assets/mcq.json
-    - assets/character_walking_left1.png
-    - assets/character_walking_left2.png
-    - assets/character_walking_right1.png
-    - assets/character_walking_right2.png
-    - assets/LEFT.png
-    - assets/RIGHT.png
-    - assets/images/character_walking_left1.png
-    - assets/images/character_walking_left2.png
-    - assets/images/character_walking_right1.png
-    - assets/images/character_walking_right2.png
-    - assets/images/LEFT.png
-    - assets/images/RIGHT.png
-    - assets/images/bush_snake.png
-    - assets/bush_snake.png
+    - assets/images/
+    - assets/
+    - assets/audio/
 
 
 
