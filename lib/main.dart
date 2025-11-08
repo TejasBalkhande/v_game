@@ -1,9 +1,153 @@
+import 'dart:convert';
 import 'dart:math';
 import 'package:flame/game.dart';
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+// --- Data Structure for Quiz Questions (mcq.json) ---
+class Question {
+  final int id;
+  final String sentence;
+  final Map<String, String> options;
+  final String answerKey; // "A", "B", or "C"
+
+  Question({
+    required this.id,
+    required this.sentence,
+    required this.options,
+    required this.answerKey,
+  });
+
+  factory Question.fromJson(Map<String, dynamic> json) {
+    return Question(
+      id: json['id'] as int,
+      sentence: json['sentence'] as String,
+      options: Map<String, String>.from(json['options'] as Map),
+      answerKey: json['answer'] as String,
+    );
+  }
+
+  // Get the correct answer string (e.g., "Ambiguous")
+  String get correctAnswer => options[answerKey] ?? 'Unknown';
+
+  // Get the option string for a given key (e.g., options["A"])
+  String optionForLane(String key) => options[key] ?? 'Error';
+}
+
+// --- Hardcoded MCQ Data (from mcq.json) ---
+const String _mcqJson = '''
+[
+  {
+    "id": 1,
+    "sentence": "Having more than one meaning; unclear",
+    "options": {
+      "A": "Ambiguous",
+      "B": "Benevolent",
+      "C": "Meticulous"
+    },
+    "answer": "A"
+  },
+  {
+    "id": 2,
+    "sentence": "Kind and generous",
+    "options": {
+      "A": "Superfluous",
+      "B": "Benevolent",
+      "C": "Frivolous"
+    },
+    "answer": "B"
+  },
+  {
+    "id": 3,
+    "sentence": "Honest and straightforward",
+    "options": {
+      "A": "Candid",
+      "B": "Pragmatic",
+      "C": "Impartial"
+    },
+    "answer": "A"
+  },
+  {
+    "id": 4,
+    "sentence": "To agree",
+    "options": {
+      "A": "Concur",
+      "B": "Frivolous",
+      "C": "Ambiguous"
+    },
+    "answer": "A"
+  },
+  {
+    "id": 5,
+    "sentence": "Hardworking and careful",
+    "options": {
+      "A": "Meticulous",
+      "B": "Diligent",
+      "C": "Superfluous"
+    },
+    "answer": "B"
+  },
+  {
+    "id": 6,
+    "sentence": "Not serious or important; silly",
+    "options": {
+      "A": "Frivolous",
+      "B": "Pragmatic",
+      "C": "Candid"
+    },
+    "answer": "A"
+  },
+  {
+    "id": 7,
+    "sentence": "Fair and not biased",
+    "options": {
+      "A": "Benevolent",
+      "B": "Impartial",
+      "C": "Pragmatic"
+    },
+    "answer": "B"
+  },
+  {
+    "id": 8,
+    "sentence": "Very careful and precise",
+    "options": {
+      "A": "Ambiguous",
+      "B": "Diligent",
+      "C": "Meticulous"
+    },
+    "answer": "C"
+  },
+  {
+    "id": 9,
+    "sentence": "Dealing with things realistically; practical",
+    "options": {
+      "A": "Pragmatic",
+      "B": "Frivolous",
+      "C": "Impartial"
+    },
+    "answer": "A"
+  },
+  {
+    "id": 10,
+    "sentence": "Unnecessary; more than needed",
+    "options": {
+      "A": "Superfluous",
+      "B": "Candid",
+      "C": "Ambiguous"
+    },
+    "answer": "A"
+  }
+]
+''';
+
+List<Question> parseQuestions() {
+  final List<dynamic> jsonList = jsonDecode(_mcqJson);
+  return jsonList.map((json) => Question.fromJson(json)).toList();
+}
+
+
+// --- Main Application and GameScreen ---
 void main() {
   runApp(const MyApp());
 }
@@ -14,9 +158,12 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Flame Character Demo',
+      title: 'Flame Vocabulary Quiz',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData.dark(),
+      theme: ThemeData.dark().copyWith(
+        scaffoldBackgroundColor: Colors.black, // Dark background
+        cardColor: Colors.grey[900], // Darker card background
+      ),
       home: const GameScreen(),
     );
   }
@@ -32,13 +179,30 @@ class GameScreen extends StatefulWidget {
 class _GameScreenState extends State<GameScreen> {
   late CharacterGame _game;
   final FocusNode _focusNode = FocusNode();
+  int _score = 0;
+  String _currentQuestionSentence = "";
+  List<String> _currentOptionLabels = ["A", "B", "C"]; // Labels for display
+
+  // Constants that mirror the lane X-positions in CharacterGame
+  static const double _leftXRatio = 0.15;
+  static const double _centerXRatio = 0.50;
+  static const double _rightXRatio = 0.87;
 
   @override
   void initState() {
     super.initState();
-    _game = CharacterGame(onGameOver: _showGameOver);
+    final questions = parseQuestions();
+    _game = CharacterGame(
+      questions: questions,
+      onGameOver: _showGameOver,
+      onNextQuestion: _updateUI,
+      onScoreChange: (score) {
+        setState(() => _score = score);
+      },
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
+      _updateUI(_game.currentQuestion, 0); // Initial UI update
     });
   }
 
@@ -60,19 +224,43 @@ class _GameScreenState extends State<GameScreen> {
     }
   }
 
+  void _updateUI(Question question, int laneIndex) {
+    // 0 = Left (A), 1 = Center (B), 2 = Right (C)
+    final optionsKeys = ['A', 'B', 'C'];
+    final labels = optionsKeys.map((key) => question.optionForLane(key)).toList();
+
+    setState(() {
+      _currentQuestionSentence = "Q${question.id}: ${question.sentence}";
+      _currentOptionLabels = labels;
+    });
+  }
+
   void _showGameOver() {
+    // Resume engine briefly for screen effect before showing dialog
+    _game.resumeEngine();
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        title: const Text('Game Over!'),
-        content: const Text('You collided with a bush!'),
+        title: const Text('Game Over! 💥'),
+        content: Text('You scored: $_score out of ${_game.questions.length}.\n'
+            'You collided with the **WRONG** answer.'),
         actions: [
           TextButton(
             onPressed: () {
               Navigator.of(context).pop();
               setState(() {
-                _game = CharacterGame(onGameOver: _showGameOver);
+                final questions = parseQuestions();
+                _game = CharacterGame(
+                  questions: questions,
+                  onGameOver: _showGameOver,
+                  onNextQuestion: _updateUI,
+                  onScoreChange: (score) {
+                    setState(() => _score = score);
+                  },
+                );
+                _score = 0;
+                _updateUI(_game.currentQuestion, 0);
               });
               _focusNode.requestFocus();
             },
@@ -81,10 +269,25 @@ class _GameScreenState extends State<GameScreen> {
         ],
       ),
     );
+    _game.pauseEngine(); // Re-pause engine after showing dialog
   }
 
   @override
   Widget build(BuildContext context) {
+    // Determine the actual X positions based on the AspectRatio and screen width
+    final double screenWidth = MediaQuery.of(context).size.width;
+    // Assuming the GameWidget occupies the width determined by the AspectRatio
+    final double gameWidth = screenWidth > 0 ? screenWidth : 10;
+
+    // We use Align widgets with a fractional width to center the labels relative
+    // to their respective lane X positions within the game container.
+    final double leftAlignment = _leftXRatio * 2 - 1; // 0.4 - 1 = -0.6 (Left side)
+    final double centerAlignment = _centerXRatio * 2 - 1; // 1.0 - 1 = 0.0 (Center)
+    final double rightAlignment = _rightXRatio * 2 - 1; // 1.6 - 1 = 0.6 (Right side)
+
+    // Fixed vertical position for the options
+    const double optionsTopPosition = 120;
+
     return Scaffold(
       body: RawKeyboardListener(
         focusNode: _focusNode,
@@ -93,28 +296,97 @@ class _GameScreenState extends State<GameScreen> {
         child: Center(
           child: AspectRatio(
             aspectRatio: 10 / 16,
-            child: Stack(
-              children: [
-                GameWidget(game: _game),
-                Positioned(
-                  left: 16,
-                  bottom: 24,
-                  child: FloatingActionButton.small(
-                    heroTag: 'leftBtn',
-                    onPressed: _game.moveLeft,
-                    child: const Icon(Icons.arrow_left),
+            child: Container(
+              color: Colors.black,
+              child: Stack(
+                children: [
+                  GameWidget(game: _game),
+
+                  // Score and Question Display (Positioned at Top)
+                  Positioned(
+                    top: 10,
+                    left: 0,
+                    right: 0,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('Score: $_score/${_game.questions.length}',
+                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white)),
+                          const SizedBox(height: 8),
+                          Card(
+                            color: Colors.grey[850],
+                            elevation: 5,
+                            child: Padding(
+                              padding: const EdgeInsets.all(12.0),
+                              child: Text(
+                                _currentQuestionSentence,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(fontSize: 16, color: Colors.lightGreenAccent),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
-                Positioned(
-                  right: 16,
-                  bottom: 24,
-                  child: FloatingActionButton.small(
-                    heroTag: 'rightBtn',
-                    onPressed: _game.moveRight,
-                    child: const Icon(Icons.arrow_right),
+
+                  // MODIFIED: Option Label A (Left Lane)
+                  Positioned(
+                    top: optionsTopPosition,
+                    left: 0,
+                    right: 0,
+                    child: Align(
+                      alignment: Alignment(leftAlignment, 0),
+                      child: _OptionLabel(label: "A", text: _currentOptionLabels[0]),
+                    ),
                   ),
-                ),
-              ],
+
+                  // MODIFIED: Option Label B (Center Lane)
+                  Positioned(
+                    top: optionsTopPosition,
+                    left: 0,
+                    right: 0,
+                    child: Align(
+                      alignment: Alignment(centerAlignment, 0),
+                      child: _OptionLabel(label: "B", text: _currentOptionLabels[1]),
+                    ),
+                  ),
+
+                  // MODIFIED: Option Label C (Right Lane)
+                  Positioned(
+                    top: optionsTopPosition,
+                    left: 0,
+                    right: 0,
+                    child: Align(
+                      alignment: Alignment(rightAlignment, 0),
+                      child: _OptionLabel(label: "C", text: _currentOptionLabels[2]),
+                    ),
+                  ),
+
+
+                  // Movement Buttons (for mobile/touch)
+                  Positioned(
+                    left: 16,
+                    bottom: 24,
+                    child: FloatingActionButton.small(
+                      heroTag: 'leftBtn',
+                      onPressed: _game.moveLeft,
+                      child: const Icon(Icons.arrow_left),
+                    ),
+                  ),
+                  Positioned(
+                    right: 16,
+                    bottom: 24,
+                    child: FloatingActionButton.small(
+                      heroTag: 'rightBtn',
+                      onPressed: _game.moveRight,
+                      child: const Icon(Icons.arrow_right),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -123,12 +395,59 @@ class _GameScreenState extends State<GameScreen> {
   }
 }
 
+class _OptionLabel extends StatelessWidget {
+  final String label;
+  final String text;
+  const _OptionLabel({required this.label, required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(maxWidth: 100), // Limit width
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+      margin: const EdgeInsets.symmetric(horizontal: 4),
+      decoration: BoxDecoration(
+        color: Colors.blueGrey.withOpacity(0.9),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white, width: 1),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.yellowAccent)),
+          const SizedBox(height: 2),
+          Text(
+            text,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 10, color: Colors.white),
+            overflow: TextOverflow.ellipsis, // Prevent long text from breaking layout
+            maxLines: 2,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ----------------------------------
+// --- Flame Game Classes (Unchanged) ---
+// ----------------------------------
+
 class CharacterGame extends FlameGame {
+  final List<Question> questions;
   final VoidCallback onGameOver;
-  CharacterGame({required this.onGameOver});
+  final Function(Question question, int laneIndex) onNextQuestion;
+  final Function(int score) onScoreChange;
+
+  CharacterGame({
+    required this.questions,
+    required this.onGameOver,
+    required this.onNextQuestion,
+    required this.onScoreChange,
+  });
 
   SpriteComponent? character;
-  List<SpriteComponent> bushes = [];
+  final List<_ObstacleBush> bushes = [];
   List<_Tree> trees = [];
 
   _ScrollingBackground? bg;
@@ -140,43 +459,58 @@ class CharacterGame extends FlameGame {
 
   double _targetX = 0.0;
   final double _moveSpeed = 900.0;
-  final double _bushSpeed = 200.0;
+  // MODIFIED: Reduced speed for a less frantic game
+  final double _bushSpeed = 150.0;
   double _canvasHeight = 0.0;
 
   bool _isGameOver = false;
   final Random _random = Random();
 
+  int _currentQuestionIndex = 0;
+  int _score = 0;
+  // This is the index (0, 1, or 2) of the CORRECT answer lane for the current question
+  int _correctLaneIndex = 0;
+
+  Question get currentQuestion => questions[_currentQuestionIndex];
+
+  // A mapping from Lane Index (0, 1, 2) to Option Key ('A', 'B', 'C')
+  static const Map<int, String> _laneIndexToKey = {
+    0: 'A',
+    1: 'B',
+    2: 'C',
+  };
+
   @override
   Future<void> onLoad() async {
     await super.onLoad();
 
-    // ✅ Background uses same speed as bushes
     bg = _ScrollingBackground(speedProvider: () => _bushSpeed);
     add(bg!);
 
     // Character
-    final image = await images.load('character.png');
+    final image = await images.load('character.png'); // Placeholder, ensure asset exists
     character = SpriteComponent(
       sprite: Sprite(image),
-      size: Vector2(100, 100),
+      size: Vector2(85, 85),
       anchor: Anchor.bottomCenter,
     );
     add(character!);
 
-    // Bushes
-    final bushImage = await images.load('bush.png');
+    // Bushes (Obstacles)
+    final bushImage = await images.load('bush.png'); // Placeholder, ensure asset exists
     final bushSprite = Sprite(bushImage);
     for (int i = 0; i < 3; i++) {
-      final bush = SpriteComponent(
+      final bush = _ObstacleBush(
         sprite: bushSprite,
         size: Vector2(150, 100),
-        anchor: Anchor.bottomCenter,
+        bushIndex: i, // 0=Left, 1=Center, 2=Right
       );
       bushes.add(bush);
       add(bush);
     }
 
-    // Trees
+    // Trees (Decorative)
+    // NOTE: This section assumes assets 'tree1.png' through 'tree6.png' exist
     for (int i = 1; i <= 6; i++) {
       final img = await images.load('tree$i.png');
       final treeSprite = Sprite(img);
@@ -209,6 +543,9 @@ class CharacterGame extends FlameGame {
     if (size.x > 0 && size.y > 0) {
       _updatePositions(size);
     }
+
+    // Initial Question setup and bush repositioning
+    _setupNextQuestion();
   }
 
   @override
@@ -237,9 +574,10 @@ class CharacterGame extends FlameGame {
     }
 
     if (bushes.length == 3) {
-      bushes[0].position = Vector2(_leftX, 0);
-      bushes[1].position = Vector2(_centerX, 0);
-      bushes[2].position = Vector2(_rightX, 0);
+      // Set the initial/reset Y positions for the bushes just off-screen top
+      bushes[0].position = Vector2(_leftX, -bushes[0].size.y);
+      bushes[1].position = Vector2(_centerX, -bushes[1].size.y);
+      bushes[2].position = Vector2(_rightX, -bushes[2].size.y);
     }
   }
 
@@ -278,6 +616,36 @@ class CharacterGame extends FlameGame {
     return rect1.overlaps(rect2);
   }
 
+  void _setupNextQuestion() {
+    if (_currentQuestionIndex >= questions.length) {
+      // Game finished all questions
+      _isGameOver = true;
+      pauseEngine();
+      onGameOver(); // Re-use game over dialog for completion message
+      return;
+    }
+
+    final question = currentQuestion;
+    final answerKey = question.answerKey;
+
+    // Determine the lane index (0, 1, or 2) of the correct answer
+    _correctLaneIndex = _laneIndexToKey.entries.firstWhere((entry) => entry.value == answerKey).key;
+
+    onNextQuestion(question, _correctLaneIndex);
+
+    // Reset bushes for the next question
+    for (int i = 0; i < bushes.length; i++) {
+      final bush = bushes[i];
+
+      // Determine if this bush is the CORRECT or WRONG option
+      bush.isCorrectOption = (i == _correctLaneIndex);
+
+      // Reset bush position to the top of the screen
+      bush.position.y = -bush.size.y;
+      bush.hasPassed = false; // Reset pass tracker
+    }
+  }
+
   @override
   void update(double dt) {
     super.update(dt);
@@ -297,27 +665,92 @@ class CharacterGame extends FlameGame {
     }
 
     // Bushes
-    for (int i = 0; i < bushes.length; i++) {
-      final bush = bushes[i];
+    for (final bush in bushes) {
       bush.position.y += _bushSpeed * dt;
 
-      if (character != null && (i == 1 || i == 2)) {
+      // 1. Collision Check (Only check when the bush is near the character)
+      if (character != null &&
+          bush.position.y > character!.position.y - character!.size.y &&
+          bush.position.y < character!.position.y + character!.size.y / 2) {
+
         if (_checkCollision(character!, bush)) {
-          _isGameOver = true;
-          pauseEngine();
-          onGameOver();
-          return;
+          // Collision logic: Collision with WRONG option -> Game Over
+          if (!bush.isCorrectOption) {
+            _isGameOver = true;
+            pauseEngine();
+            onGameOver();
+            return;
+          }
         }
       }
 
+      // 2. Pass Through Check (Check if the bush has passed the character's line)
+      if (character != null && bush.position.y > character!.position.y) {
+        // Bush has passed the character line.
+
+        // If the correct option bush passes, it means the player successfully avoided it.
+        if (bush.isCorrectOption && !bush.hasPassed) {
+          bush.hasPassed = true; // Mark as passed to prevent multiple scoring
+
+          // Check if ALL bushes have passed, then move to the next question.
+          if (bushes.every((b) => b.hasPassed || !b.isCorrectOption)) {
+            // Successful: All wrong options avoided (checked by collision), correct option passed through.
+            _score++;
+            onScoreChange(_score);
+            _currentQuestionIndex++;
+            _setupNextQuestion();
+            return;
+          }
+        }
+      }
+
+      // 3. Off-Screen Reset (Bushes reset off-screen top once they are completely below the screen)
       if (bush.position.y > _canvasHeight + 100) {
-        bush.position.y = -100;
+        // If a wrong bush goes off-screen, it means the player successfully avoided it.
+        // This bush is now irrelevant until the next question is set.
+        bush.position.y = -_canvasHeight; // Keep it out of sight until next question setup
+        bush.hasPassed = false;
       }
     }
   }
 }
 
-/// ✅ Background now syncs with bush/tree speed using a function reference
+/// Obstacle/Option Component
+class _ObstacleBush extends SpriteComponent {
+  final int bushIndex; // 0, 1, or 2 (Lane Index)
+  bool isCorrectOption = false;
+  bool hasPassed = false; // To track if the correct bush has passed the character line
+
+  _ObstacleBush({
+    required Sprite sprite,
+    required Vector2 size,
+    required this.bushIndex,
+  }) : super(sprite: sprite, size: size, anchor: Anchor.bottomCenter);
+
+  // Custom update to change color based on correct/wrong for visual debugging/feedback
+  @override
+  void render(Canvas canvas) {
+    super.render(canvas);
+    if (isCorrectOption) {
+      // Draw a RED border for the correct answer (AVOID)
+      final Paint correctPaint = Paint()
+        ..color = Colors.redAccent
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 5.0;
+      canvas.drawRect(toRect(), correctPaint);
+    } else {
+      // Draw a GREEN border for the wrong answers (SAFE/COLLECT)
+      final Paint wrongPaint = Paint()
+        ..color = Colors.green
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 3.0;
+      canvas.drawRect(toRect(), wrongPaint);
+    }
+  }
+}
+
+
+/// Scrolling Background Component
 class _ScrollingBackground extends Component with HasGameRef<CharacterGame> {
   late Sprite bgSprite;
   SpriteComponent? bg1;
@@ -330,6 +763,7 @@ class _ScrollingBackground extends Component with HasGameRef<CharacterGame> {
   @override
   Future<void> onLoad() async {
     await super.onLoad();
+    // NOTE: This assumes 'bg3.png' asset exists
     final bgImage = await gameRef.images.load('bg3.png');
     bgSprite = Sprite(bgImage);
 
@@ -354,7 +788,7 @@ class _ScrollingBackground extends Component with HasGameRef<CharacterGame> {
   @override
   void update(double dt) {
     super.update(dt);
-    final speed = speedProvider(); // dynamically match bush/tree speed
+    final speed = speedProvider();
 
     bg1!.position.y += speed * dt;
     bg2!.position.y += speed * dt;
@@ -368,7 +802,7 @@ class _ScrollingBackground extends Component with HasGameRef<CharacterGame> {
   }
 }
 
-/// ✅ Tree also syncs dynamically to main bush speed
+/// Decorative Tree Component
 class _Tree extends SpriteComponent with HasGameRef<CharacterGame> {
   final double Function() speedProvider;
   final bool isLeft;
