@@ -812,7 +812,9 @@ class CharacterGame extends FlameGame {
       if (character != null) {
         // Character's 'foot' position (bottom-center anchor)
         final charY = character!.position.y;
+        final charHeight = character!.size.y;
         final bushY = bush.position.y;
+        final bushHeight = bush.size.y;
 
         // NEW: Check for sprite transformation window
         final isNearCharacter = bushY >= charY - _bushTransformStartOffset &&
@@ -830,8 +832,12 @@ class CharacterGame extends FlameGame {
           }
         }
 
-        // 1. Collision Check (Only check when the bush is near the character)
-        if (bushY > charY - character!.size.y && bushY < charY) {
+        // 1. **MODIFIED** Collision Check (Trigger when bush is near the character's feet)
+        // We check if the bottom of the character (charY) is overlapping the bush's Rect.
+        // Bush's bottom edge is at bushY. Bush's top edge is at bushY - bushHeight.
+        // We only check in the vertical band that is immediately around the character's feet.
+        const double collisionWindowOffset = 10.0; // Allow a small vertical overlap for collision
+        if (bushY >= charY - collisionWindowOffset && bushY - bushHeight < charY) {
           if (_checkCollision(character!, bush)) {
             // Collision logic: Collision with WRONG option -> Game Over
             if (!bush.isCorrectOption) {
@@ -840,13 +846,12 @@ class CharacterGame extends FlameGame {
               onGameOver();
               return;
             }
-            // Collision with correct option is OK (player chose correct lane)
-            // The score logic is now fully managed by the Pass Through Check below.
+            // Collision with correct option is OK
           }
         }
 
         // 2. Pass Through Check (Check if the bush has passed the character's line)
-        // We use the top of the character's bounding box to be safer
+        // Check if the bush's bottom edge (bushY) has passed the character's position (charY).
         if (bushY > charY && !bush.hasPassed) {
           // Bush has passed the character's y-position (bottom anchor).
 
@@ -854,9 +859,6 @@ class CharacterGame extends FlameGame {
           if (bush.isCorrectOption) {
             bush.hasPassed = true; // Mark as passed to prevent multiple scoring
 
-            // Check if ALL bushes have now been processed (correct passed, wrongs either avoided or passed)
-            // For scoring, we only care that the correct one has passed. The game over logic
-            // (collision with a wrong bush) handles the failure state.
             // If the correct bush passes, it's a win for the question.
             _score++;
             onScoreChange(_score);
@@ -864,8 +866,7 @@ class CharacterGame extends FlameGame {
             _setupNextQuestion();
             return;
           } else {
-            // Wrong bushes also pass. We mark them as passed just to ensure they don't interfere
-            // with the 'all bushes processed' logic in a simple way (though that logic is now simpler).
+            // Wrong bushes also pass.
             bush.hasPassed = true;
           }
         }
