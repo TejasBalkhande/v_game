@@ -58,6 +58,8 @@ flutter:
     - assets/images/character_walking_right2.png
     - assets/images/LEFT.png
     - assets/images/RIGHT.png
+    - assets/images/bush_snake.png
+    - assets/bush_snake.png
 
 
 

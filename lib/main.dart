@@ -3,7 +3,7 @@ import 'dart:math';
 import 'package:flame/game.dart';
 import 'package:flame/components.dart';
 import 'package:flame/sprite.dart';
-import 'package:flame/flame.dart'; // FIX: Add the main Flame import for asset access
+import 'package:flame/flame.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -151,6 +151,10 @@ List<Question> parseQuestions() {
 
 // --- Main Application and GameScreen ---
 void main() {
+  // Ensure the Flame engine is initialized before running the app
+  WidgetsFlutterBinding.ensureInitialized();
+  Flame.device.fullScreen();
+  Flame.device.setLandscape(); // Keep the portrait orientation for the game UI
   runApp(const MyApp());
 }
 
@@ -264,7 +268,11 @@ class _GameScreenState extends State<GameScreen> {
                   },
                 );
                 _score = 0;
-                _updateUI(_game.currentQuestion, 0);
+                // Re-setup is handled within the game's onLoad/setup, but we need
+                // to explicitly request the initial UI update after creating the new game instance.
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  _updateUI(_game.currentQuestion, 0);
+                });
               });
               _focusNode.requestFocus();
             },
@@ -281,7 +289,9 @@ class _GameScreenState extends State<GameScreen> {
     // Determine the actual X positions based on the AspectRatio and screen width
     final double screenWidth = MediaQuery.of(context).size.width;
     // Assuming the GameWidget occupies the width determined by the AspectRatio
-    final double gameWidth = screenWidth > 0 ? screenWidth : 10;
+    // This value is not strictly needed for the Positioned widgets since we use Align
+    // but kept for context.
+    // final double gameWidth = screenWidth > 0 ? screenWidth : 10;
 
     // We use Align widgets with a fractional width to center the labels relative
     // to their respective lane X positions within the game container.
@@ -579,6 +589,17 @@ class CharacterGame extends FlameGame {
   int _score = 0;
   int _correctLaneIndex = 0;
 
+  // NEW: Sprites for the bushes
+  late Sprite _normalBushSprite;
+  late Sprite _snakeBushSprite;
+
+  // NEW: Character collision window for sprite change
+  // Transformation starts when bush is this far *above* the character's feet
+  static const double _bushTransformStartOffset = 150.0;
+  // Transformation ends when bush is this far *below* the character's feet
+  static const double _bushTransformEndOffset = 0.0;
+
+
   Question get currentQuestion => questions[_currentQuestionIndex];
 
   static const Map<int, String> _laneIndexToKey = {
@@ -590,6 +611,12 @@ class CharacterGame extends FlameGame {
   @override
   Future<void> onLoad() async {
     await super.onLoad();
+
+    // Load Image Assets
+    final images = Flame.images;
+    _normalBushSprite = Sprite(await images.load('bush.png'));
+    // NEW: Load the snake bush sprite
+    _snakeBushSprite = Sprite(await images.load('bush_snake.png'));
 
     bg = _ScrollingBackground(speedProvider: () => _bushSpeed);
     add(bg!);
@@ -603,12 +630,11 @@ class CharacterGame extends FlameGame {
     add(character!);
 
     // Bushes (Obstacles)
-    final bushImage = await Flame.images.load('bush.png');
-    final bushSprite = Sprite(bushImage);
     for (int i = 0; i < 3; i++) {
       final bush = _ObstacleBush(
-        sprite: bushSprite,
-        size: Vector2(150, 100),
+        normalSprite: _normalBushSprite,
+        snakeSprite: _snakeBushSprite, // Pass the snake sprite
+        size: Vector2(120, 100),
         bushIndex: i, // 0=Left, 1=Center, 2=Right
       );
       bushes.add(bush);
@@ -617,7 +643,7 @@ class CharacterGame extends FlameGame {
 
     // Trees (Decorative)
     for (int i = 1; i <= 6; i++) {
-      final img = await Flame.images.load('tree$i.png'); // FIX: Use Flame.images
+      final img = await images.load('tree$i.png');
       final treeSprite = Sprite(img);
       final bool leftSide = _random.nextBool();
       final double xPos = leftSide ? size.x * 0.05 : size.x * 0.95;
@@ -675,6 +701,7 @@ class CharacterGame extends FlameGame {
     _targetX = _xForIndex(_posIndex);
 
     if (character != null) {
+      // Position character slightly above the very bottom
       character!.position = Vector2(_targetX, canvasSize.y - 16);
     }
 
@@ -722,6 +749,7 @@ class CharacterGame extends FlameGame {
   }
 
   bool _checkCollision(PositionComponent obj1, PositionComponent obj2) {
+    // Check collision based on the Rects
     return obj1.toRect().overlaps(obj2.toRect());
   }
 
@@ -749,9 +777,9 @@ class CharacterGame extends FlameGame {
       // Determine if this bush is the CORRECT or WRONG option
       bush.isCorrectOption = (i == _correctLaneIndex);
 
-      // Reset bush position to the top of the screen
+      // Reset bush state and position to the top of the screen
+      bush.resetState();
       bush.position.y = -bush.size.y;
-      bush.hasPassed = false; // Reset pass tracker
     }
   }
 
@@ -781,48 +809,73 @@ class CharacterGame extends FlameGame {
     for (final bush in bushes) {
       bush.position.y += _bushSpeed * dt;
 
-      // 1. Collision Check (Only check when the bush is near the character)
-      if (character != null &&
-          bush.position.y > character!.position.y - character!.size.y &&
-          bush.position.y < character!.position.y + character!.size.y / 2) {
+      if (character != null) {
+        // Character's 'foot' position (bottom-center anchor)
+        final charY = character!.position.y;
+        final bushY = bush.position.y;
 
-        if (_checkCollision(character!, bush)) {
-          // Collision logic: Collision with WRONG option -> Game Over
-          if (!bush.isCorrectOption) {
-            _isGameOver = true;
-            pauseEngine();
-            onGameOver();
-            return;
+        // NEW: Check for sprite transformation window
+        final isNearCharacter = bushY >= charY - _bushTransformStartOffset &&
+            bushY <= charY - _bushTransformEndOffset;
+
+        if (isNearCharacter) {
+          // Logic for sprite change
+          if (!bush.isCorrectOption && !bush.isSnake) {
+            bush.turnToSnake();
+          }
+        } else if (bushY > charY) {
+          // If the bush has passed the character, reset snake state (if it was a wrong option)
+          if (bush.isSnake) {
+            bush.turnToNormal();
           }
         }
-      }
 
-      // 2. Pass Through Check (Check if the bush has passed the character's line)
-      if (character != null && bush.position.y > character!.position.y) {
-        // Bush has passed the character line.
+        // 1. Collision Check (Only check when the bush is near the character)
+        if (bushY > charY - character!.size.y && bushY < charY) {
+          if (_checkCollision(character!, bush)) {
+            // Collision logic: Collision with WRONG option -> Game Over
+            if (!bush.isCorrectOption) {
+              _isGameOver = true;
+              pauseEngine();
+              onGameOver();
+              return;
+            }
+            // Collision with correct option is OK (player chose correct lane)
+            // The score logic is now fully managed by the Pass Through Check below.
+          }
+        }
 
-        // If the correct option bush passes, it means the player successfully avoided it.
-        if (bush.isCorrectOption && !bush.hasPassed) {
-          bush.hasPassed = true; // Mark as passed to prevent multiple scoring
+        // 2. Pass Through Check (Check if the bush has passed the character's line)
+        // We use the top of the character's bounding box to be safer
+        if (bushY > charY && !bush.hasPassed) {
+          // Bush has passed the character's y-position (bottom anchor).
 
-          // Check if ALL bushes have passed, then move to the next question.
-          if (bushes.every((b) => b.hasPassed || !b.isCorrectOption)) {
-            // Successful: All wrong options avoided (checked by collision), correct option passed through.
+          // If the *correct* option bush passes, it means the player successfully landed in its lane.
+          if (bush.isCorrectOption) {
+            bush.hasPassed = true; // Mark as passed to prevent multiple scoring
+
+            // Check if ALL bushes have now been processed (correct passed, wrongs either avoided or passed)
+            // For scoring, we only care that the correct one has passed. The game over logic
+            // (collision with a wrong bush) handles the failure state.
+            // If the correct bush passes, it's a win for the question.
             _score++;
             onScoreChange(_score);
             _currentQuestionIndex++;
             _setupNextQuestion();
             return;
+          } else {
+            // Wrong bushes also pass. We mark them as passed just to ensure they don't interfere
+            // with the 'all bushes processed' logic in a simple way (though that logic is now simpler).
+            bush.hasPassed = true;
           }
         }
       }
 
       // 3. Off-Screen Reset (Bushes reset off-screen top once they are completely below the screen)
       if (bush.position.y > _canvasHeight + 100) {
-        // If a wrong bush goes off-screen, it means the player successfully avoided it.
-        // This bush is now irrelevant until the next question is set.
-        bush.position.y = -_canvasHeight; // Keep it out of sight until next question setup
-        bush.hasPassed = false;
+        // This is a safety reset; the question logic usually handles repositioning.
+        bush.position.y = -_canvasHeight;
+        bush.resetState();
       }
     }
   }
@@ -831,28 +884,56 @@ class CharacterGame extends FlameGame {
 /// Obstacle/Option Component
 class _ObstacleBush extends SpriteComponent {
   final int bushIndex; // 0, 1, or 2 (Lane Index)
+  final Sprite normalSprite;
+  final Sprite snakeSprite;
+
   bool isCorrectOption = false;
-  bool hasPassed = false; // To track if the correct bush has passed the character line
+  bool hasPassed = false;
+  bool isSnake = false; // NEW: Track if the sprite has changed
 
   _ObstacleBush({
-    required Sprite sprite,
+    required this.normalSprite,
+    required this.snakeSprite,
     required Vector2 size,
     required this.bushIndex,
-  }) : super(sprite: sprite, size: size, anchor: Anchor.bottomCenter);
+  }) : super(sprite: normalSprite, size: size, anchor: Anchor.bottomCenter);
+
+  // NEW: Change the sprite to the snake bush
+  void turnToSnake() {
+    if (!isSnake) {
+      sprite = snakeSprite;
+      isSnake = true;
+    }
+  }
+
+  // NEW: Change the sprite back to the normal bush
+  void turnToNormal() {
+    if (isSnake) {
+      sprite = normalSprite;
+      isSnake = false;
+    }
+  }
+
+  // NEW: Reset the state for the next question
+  void resetState() {
+    turnToNormal(); // Ensure it's the normal bush initially
+    hasPassed = false;
+    // isCorrectOption is set externally by CharacterGame
+  }
 
   @override
   void render(Canvas canvas) {
     super.render(canvas);
-    // Draw visual feedback borders for debugging/visual aid
+    // Draw visual feedback borders for debugging/visual aid (OPTIONAL, can be removed)
     if (isCorrectOption) {
       final Paint correctPaint = Paint()
-        ..color = Colors.redAccent
+        ..color = Colors.green.withOpacity(0.5)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 5.0;
       canvas.drawRect(toRect(), correctPaint);
     } else {
       final Paint wrongPaint = Paint()
-        ..color = Colors.green
+        ..color = Colors.red.withOpacity(0.5)
         ..style = PaintingStyle.stroke
         ..strokeWidth = 3.0;
       canvas.drawRect(toRect(), wrongPaint);
