@@ -29,12 +29,13 @@ class GameScreen extends StatefulWidget {
 }
 
 class _GameScreenState extends State<GameScreen> {
-  final _game = CharacterGame();
+  late CharacterGame _game;
   final FocusNode _focusNode = FocusNode();
 
   @override
   void initState() {
     super.initState();
+    _game = CharacterGame(onGameOver: _showGameOver);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
     });
@@ -58,6 +59,29 @@ class _GameScreenState extends State<GameScreen> {
     }
   }
 
+  void _showGameOver() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Text('Game Over!'),
+        content: const Text('You collided with a bush!'),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              setState(() {
+                _game = CharacterGame(onGameOver: _showGameOver);
+              });
+              _focusNode.requestFocus();
+            },
+            child: const Text('Restart'),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -65,28 +89,33 @@ class _GameScreenState extends State<GameScreen> {
         focusNode: _focusNode,
         autofocus: true,
         onKey: _onRawKey,
-        child: Stack(
-          children: [
-            GameWidget(game: _game),
-            Positioned(
-              left: 16,
-              bottom: 24,
-              child: FloatingActionButton.small(
-                heroTag: 'leftBtn',
-                onPressed: _game.moveLeft,
-                child: const Icon(Icons.arrow_left),
-              ),
+        child: Center(
+          child: AspectRatio(
+            aspectRatio: 10 / 16,
+            child: Stack(
+              children: [
+                GameWidget(game: _game),
+                Positioned(
+                  left: 16,
+                  bottom: 24,
+                  child: FloatingActionButton.small(
+                    heroTag: 'leftBtn',
+                    onPressed: _game.moveLeft,
+                    child: const Icon(Icons.arrow_left),
+                  ),
+                ),
+                Positioned(
+                  right: 16,
+                  bottom: 24,
+                  child: FloatingActionButton.small(
+                    heroTag: 'rightBtn',
+                    onPressed: _game.moveRight,
+                    child: const Icon(Icons.arrow_right),
+                  ),
+                ),
+              ],
             ),
-            Positioned(
-              right: 16,
-              bottom: 24,
-              child: FloatingActionButton.small(
-                heroTag: 'rightBtn',
-                onPressed: _game.moveRight,
-                child: const Icon(Icons.arrow_right),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
@@ -94,7 +123,13 @@ class _GameScreenState extends State<GameScreen> {
 }
 
 class CharacterGame extends FlameGame {
+  final VoidCallback onGameOver;
+
+  CharacterGame({required this.onGameOver});
+
   SpriteComponent? character;
+  SpriteComponent? background;
+  List<SpriteComponent> bushes = [];
 
   int _posIndex = 1; // 0 = Left, 1 = Center, 2 = Right
   late double _leftX;
@@ -104,10 +139,27 @@ class CharacterGame extends FlameGame {
   double _targetX = 0.0;
   final double _moveSpeed = 900.0;
 
+  // Bush movement properties
+  final double _bushSpeed = 200.0;
+  double _canvasHeight = 0.0;
+
+  // Game state
+  bool _isGameOver = false;
+
   @override
   Future<void> onLoad() async {
     await super.onLoad();
 
+    // Load background image
+    final bgImage = await images.load('bg3.png');
+    background = SpriteComponent(
+      sprite: Sprite(bgImage),
+      size: size, // Fit to full screen
+      anchor: Anchor.topLeft,
+    );
+    add(background!);
+
+    // Load character sprite
     final image = await images.load('character.png');
     final sprite = Sprite(image);
 
@@ -116,12 +168,32 @@ class CharacterGame extends FlameGame {
       size: Vector2(100, 100),
       anchor: Anchor.bottomCenter,
     );
-
     add(character!);
 
+    // Load bush sprite and create 3 bushes (one for each lane)
+    final bushImage = await images.load('bush.png');
+    final bushSprite = Sprite(bushImage);
+
+    for (int i = 0; i < 3; i++) {
+      final bush = SpriteComponent(
+        sprite: bushSprite,
+        size: Vector2(150, 100),
+        anchor: Anchor.bottomCenter,
+      );
+      bushes.add(bush);
+      add(bush);
+    }
+
+    // Ensure background stays at back
+    background!.priority = -1;
+    character!.priority = 1;
+    for (final bush in bushes) {
+      bush.priority = 2;
+    }
+
+    // Set initial positions when size is known
     if (size.x > 0 && size.y > 0) {
-      _targetX = _xForIndex(_posIndex);
-      character!.position = Vector2(_targetX, size.y - 16);
+      _updatePositions(size);
     }
   }
 
@@ -129,14 +201,31 @@ class CharacterGame extends FlameGame {
   void onGameResize(Vector2 canvasSize) {
     super.onGameResize(canvasSize);
 
+    // Resize background to fit screen
+    if (background != null) {
+      background!.size = canvasSize;
+    }
+
+    _updatePositions(canvasSize);
+  }
+
+  void _updatePositions(Vector2 canvasSize) {
     _leftX = canvasSize.x * 0.20;
     _centerX = canvasSize.x * 0.50;
     _rightX = canvasSize.x * 0.80;
+    _canvasHeight = canvasSize.y;
 
     _targetX = _xForIndex(_posIndex);
 
     if (character != null) {
       character!.position = Vector2(_targetX, canvasSize.y - 16);
+    }
+
+    // Position bushes initially
+    if (bushes.length == 3) {
+      bushes[0].position = Vector2(_leftX, 0);
+      bushes[1].position = Vector2(_centerX, 0);
+      bushes[2].position = Vector2(_rightX, 0);
     }
   }
 
@@ -153,11 +242,13 @@ class CharacterGame extends FlameGame {
   }
 
   void moveLeft() {
+    if (_isGameOver) return;
     final newIndex = (_posIndex - 1).clamp(0, 2);
     _moveToIndex(newIndex);
   }
 
   void moveRight() {
+    if (_isGameOver) return;
     final newIndex = (_posIndex + 1).clamp(0, 2);
     _moveToIndex(newIndex);
   }
@@ -168,27 +259,56 @@ class CharacterGame extends FlameGame {
     _targetX = _xForIndex(newIndex);
   }
 
+  bool _checkCollision(SpriteComponent obj1, SpriteComponent obj2) {
+    final rect1 = obj1.toRect();
+    final rect2 = obj2.toRect();
+    return rect1.overlaps(rect2);
+  }
+
   @override
   void update(double dt) {
     super.update(dt);
-    if (character == null) return;
 
-    final pos = character!.position;
-    final dx = _targetX - pos.x;
+    if (_isGameOver) return;
 
-    if (dx.abs() < 0.5) {
-      character!.position = Vector2(_targetX, pos.y);
-      return;
+    // Update character movement
+    if (character != null) {
+      final pos = character!.position;
+      final dx = _targetX - pos.x;
+
+      if (dx.abs() >= 0.5) {
+        final step = _moveSpeed * dt;
+        double newX;
+        if (dx.abs() <= step) {
+          newX = _targetX;
+        } else {
+          newX = pos.x + (dx.sign * step);
+        }
+        character!.position = Vector2(newX, pos.y);
+      } else {
+        character!.position = Vector2(_targetX, pos.y);
+      }
     }
 
-    final step = _moveSpeed * dt;
-    double newX;
-    if (dx.abs() <= step) {
-      newX = _targetX;
-    } else {
-      newX = pos.x + (dx.sign * step);
-    }
+    // Update bush positions - move them down together
+    for (int i = 0; i < bushes.length; i++) {
+      final bush = bushes[i];
+      bush.position.y += _bushSpeed * dt;
 
-    character!.position = Vector2(newX, pos.y);
+      // Check collision ONLY for center (index 1) and right (index 2) bushes
+      if (character != null && (i == 1 || i == 2)) {
+        if (_checkCollision(character!, bush)) {
+          _isGameOver = true;
+          pauseEngine();
+          onGameOver();
+          return;
+        }
+      }
+
+      // Reset bush to top when it goes off screen
+      if (bush.position.y > _canvasHeight + 100) {
+        bush.position.y = -100;
+      }
+    }
   }
 }

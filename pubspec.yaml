@@ -26,6 +26,24 @@ flutter:
     - assets/bush.png
     - assets/images/character.png
     - assets/images/bush.png
+    - assets/images/bg.png
+    - assets/bg.png
+    - assets/images/bg1.png
+    - assets/bg1.png
+    - assets/images/bg3.png
+    - assets/bg3.png
+    - assets/images/tree1.png
+    - assets/images/tree2.png
+    - assets/images/tree3.png
+    - assets/images/tree4.png
+    - assets/images/tree5.png
+    - assets/images/tree6.png
+    - assets/tree1.png
+    - assets/tree2.png
+    - assets/tree3.png
+    - assets/tree4.png
+    - assets/tree5.png
+    - assets/tree6.png
 
 
 
