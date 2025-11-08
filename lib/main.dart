@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flame/game.dart';
 import 'package:flame/components.dart';
 import 'package:flutter/material.dart';
@@ -124,12 +125,13 @@ class _GameScreenState extends State<GameScreen> {
 
 class CharacterGame extends FlameGame {
   final VoidCallback onGameOver;
-
   CharacterGame({required this.onGameOver});
 
   SpriteComponent? character;
-  SpriteComponent? background;
   List<SpriteComponent> bushes = [];
+  List<_Tree> trees = [];
+
+  _ScrollingBackground? bg;
 
   int _posIndex = 1; // 0 = Left, 1 = Center, 2 = Right
   late double _leftX;
@@ -138,42 +140,32 @@ class CharacterGame extends FlameGame {
 
   double _targetX = 0.0;
   final double _moveSpeed = 900.0;
-
-  // Bush movement properties
   final double _bushSpeed = 200.0;
   double _canvasHeight = 0.0;
 
-  // Game state
   bool _isGameOver = false;
+  final Random _random = Random();
 
   @override
   Future<void> onLoad() async {
     await super.onLoad();
 
-    // Load background image
-    final bgImage = await images.load('bg3.png');
-    background = SpriteComponent(
-      sprite: Sprite(bgImage),
-      size: size, // Fit to full screen
-      anchor: Anchor.topLeft,
-    );
-    add(background!);
+    // ✅ Background uses same speed as bushes
+    bg = _ScrollingBackground(speedProvider: () => _bushSpeed);
+    add(bg!);
 
-    // Load character sprite
+    // Character
     final image = await images.load('character.png');
-    final sprite = Sprite(image);
-
     character = SpriteComponent(
-      sprite: sprite,
+      sprite: Sprite(image),
       size: Vector2(100, 100),
       anchor: Anchor.bottomCenter,
     );
     add(character!);
 
-    // Load bush sprite and create 3 bushes (one for each lane)
+    // Bushes
     final bushImage = await images.load('bush.png');
     final bushSprite = Sprite(bushImage);
-
     for (int i = 0; i < 3; i++) {
       final bush = SpriteComponent(
         sprite: bushSprite,
@@ -184,14 +176,36 @@ class CharacterGame extends FlameGame {
       add(bush);
     }
 
-    // Ensure background stays at back
-    background!.priority = -1;
-    character!.priority = 1;
-    for (final bush in bushes) {
-      bush.priority = 2;
+    // Trees
+    for (int i = 1; i <= 6; i++) {
+      final img = await images.load('tree$i.png');
+      final treeSprite = Sprite(img);
+      final bool leftSide = _random.nextBool();
+      final double xPos = leftSide ? size.x * 0.05 : size.x * 0.95;
+      final double yPos = -_random.nextDouble() * size.y;
+
+      final tree = _Tree(
+        sprite: treeSprite,
+        position: Vector2(xPos, yPos),
+        size: Vector2(100, 150),
+        speedProvider: () => _bushSpeed,
+        canvasHeight: size.y,
+        isLeft: leftSide,
+      );
+      trees.add(tree);
+      add(tree);
     }
 
-    // Set initial positions when size is known
+    // Drawing order
+    if (bg != null) bg!.priority = -2;
+    for (final tree in trees) {
+      tree.priority = 0;
+    }
+    for (final bush in bushes) {
+      bush.priority = 1;
+    }
+    character!.priority = 2;
+
     if (size.x > 0 && size.y > 0) {
       _updatePositions(size);
     }
@@ -200,13 +214,15 @@ class CharacterGame extends FlameGame {
   @override
   void onGameResize(Vector2 canvasSize) {
     super.onGameResize(canvasSize);
-
-    // Resize background to fit screen
-    if (background != null) {
-      background!.size = canvasSize;
-    }
+    if (canvasSize.x <= 0 || canvasSize.y <= 0) return;
 
     _updatePositions(canvasSize);
+    _canvasHeight = canvasSize.y;
+    bg?.resizeToCanvas(canvasSize);
+
+    for (final tree in trees) {
+      tree.canvasHeight = canvasSize.y;
+    }
   }
 
   void _updatePositions(Vector2 canvasSize) {
@@ -214,14 +230,12 @@ class CharacterGame extends FlameGame {
     _centerX = canvasSize.x * 0.50;
     _rightX = canvasSize.x * 0.80;
     _canvasHeight = canvasSize.y;
-
     _targetX = _xForIndex(_posIndex);
 
     if (character != null) {
       character!.position = Vector2(_targetX, canvasSize.y - 16);
     }
 
-    // Position bushes initially
     if (bushes.length == 3) {
       bushes[0].position = Vector2(_leftX, 0);
       bushes[1].position = Vector2(_centerX, 0);
@@ -235,7 +249,6 @@ class CharacterGame extends FlameGame {
         return _leftX;
       case 2:
         return _rightX;
-      case 1:
       default:
         return _centerX;
     }
@@ -268,34 +281,26 @@ class CharacterGame extends FlameGame {
   @override
   void update(double dt) {
     super.update(dt);
-
     if (_isGameOver) return;
 
-    // Update character movement
+    // Character lane movement
     if (character != null) {
       final pos = character!.position;
       final dx = _targetX - pos.x;
-
       if (dx.abs() >= 0.5) {
         final step = _moveSpeed * dt;
-        double newX;
-        if (dx.abs() <= step) {
-          newX = _targetX;
-        } else {
-          newX = pos.x + (dx.sign * step);
-        }
+        final newX = (dx.abs() <= step) ? _targetX : pos.x + (dx.sign * step);
         character!.position = Vector2(newX, pos.y);
       } else {
         character!.position = Vector2(_targetX, pos.y);
       }
     }
 
-    // Update bush positions - move them down together
+    // Bushes
     for (int i = 0; i < bushes.length; i++) {
       final bush = bushes[i];
       bush.position.y += _bushSpeed * dt;
 
-      // Check collision ONLY for center (index 1) and right (index 2) bushes
       if (character != null && (i == 1 || i == 2)) {
         if (_checkCollision(character!, bush)) {
           _isGameOver = true;
@@ -305,10 +310,91 @@ class CharacterGame extends FlameGame {
         }
       }
 
-      // Reset bush to top when it goes off screen
       if (bush.position.y > _canvasHeight + 100) {
         bush.position.y = -100;
       }
+    }
+  }
+}
+
+/// ✅ Background now syncs with bush/tree speed using a function reference
+class _ScrollingBackground extends Component with HasGameRef<CharacterGame> {
+  late Sprite bgSprite;
+  SpriteComponent? bg1;
+  SpriteComponent? bg2;
+  final double Function() speedProvider;
+  double canvasHeight = 0.0;
+
+  _ScrollingBackground({required this.speedProvider});
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    final bgImage = await gameRef.images.load('bg3.png');
+    bgSprite = Sprite(bgImage);
+
+    final size = gameRef.size;
+    bg1 = SpriteComponent(sprite: bgSprite, size: size, anchor: Anchor.topLeft, position: Vector2(0, 0));
+    bg2 = SpriteComponent(sprite: bgSprite, size: size, anchor: Anchor.topLeft, position: Vector2(0, -size.y));
+
+    addAll([bg1!, bg2!]);
+    canvasHeight = size.y;
+  }
+
+  void resizeToCanvas(Vector2 size) {
+    bg1!
+      ..size = size
+      ..position = Vector2(0, 0);
+    bg2!
+      ..size = size
+      ..position = Vector2(0, -size.y);
+    canvasHeight = size.y;
+  }
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    final speed = speedProvider(); // dynamically match bush/tree speed
+
+    bg1!.position.y += speed * dt;
+    bg2!.position.y += speed * dt;
+
+    if (bg1!.position.y >= canvasHeight) {
+      bg1!.position.y = bg2!.position.y - canvasHeight;
+    }
+    if (bg2!.position.y >= canvasHeight) {
+      bg2!.position.y = bg1!.position.y - canvasHeight;
+    }
+  }
+}
+
+/// ✅ Tree also syncs dynamically to main bush speed
+class _Tree extends SpriteComponent with HasGameRef<CharacterGame> {
+  final double Function() speedProvider;
+  final bool isLeft;
+  double canvasHeight;
+  final Random _random = Random();
+
+  _Tree({
+    required Sprite sprite,
+    required Vector2 position,
+    required Vector2 size,
+    required this.speedProvider,
+    required this.canvasHeight,
+    required this.isLeft,
+  }) : super(sprite: sprite, position: position, size: size, anchor: Anchor.bottomCenter);
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    final speed = speedProvider();
+    position.y += speed * dt;
+
+    if (position.y > canvasHeight + 200) {
+      position.y = -_random.nextDouble() * canvasHeight;
+      final bool newLeft = _random.nextBool();
+      final double canvasWidth = gameRef.size.x > 0 ? gameRef.size.x : 1.0;
+      position.x = newLeft ? canvasWidth * 0.05 : canvasWidth * 0.95;
     }
   }
 }
