@@ -46,6 +46,18 @@ flutter:
     - assets/tree6.png
     - assets/images/mcq.json
     - assets/mcq.json
+    - assets/character_walking_left1.png
+    - assets/character_walking_left2.png
+    - assets/character_walking_right1.png
+    - assets/character_walking_right2.png
+    - assets/LEFT.png
+    - assets/RIGHT.png
+    - assets/images/character_walking_left1.png
+    - assets/images/character_walking_left2.png
+    - assets/images/character_walking_right1.png
+    - assets/images/character_walking_right2.png
+    - assets/images/LEFT.png
+    - assets/images/RIGHT.png
 
 
 

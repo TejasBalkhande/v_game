@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:math';
 import 'package:flame/game.dart';
 import 'package:flame/components.dart';
+import 'package:flame/sprite.dart';
+import 'package:flame/flame.dart'; // FIX: Add the main Flame import for asset access
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -221,6 +223,8 @@ class _GameScreenState extends State<GameScreen> {
       } else if (key == LogicalKeyboardKey.arrowRight) {
         _game.moveRight();
       }
+    } else if (event is RawKeyUpEvent) {
+      // Stop moving animation when key is released
     }
   }
 
@@ -429,8 +433,114 @@ class _OptionLabel extends StatelessWidget {
   }
 }
 
+
+// --- NEW Character Component for Animation ---
+class Character extends SpriteAnimationGroupComponent<CharacterState> with HasGameRef<CharacterGame> {
+  final double speed;
+  CharacterState _currentState = CharacterState.walk;
+  double _animationTimeLeft = 0.0;
+  final double _turnDuration = 0.15; // Time to display the turn frame
+
+  Character({
+    required Vector2 size,
+    required Vector2 position,
+    required this.speed,
+  }) : super(
+    size: size,
+    position: position,
+    anchor: Anchor.bottomCenter,
+  );
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+
+    // Load Sprites using gameRef.images or Flame.images
+    final images = Flame.images; // Access global ImageCache
+
+    final walk1 = await images.load('character_walking_right1.png');
+    final walk2 = await images.load('character_walking_right2.png');
+    final leftTurn = await images.load('LEFT.png');
+    final rightTurn = await images.load('RIGHT.png');
+
+    // Create Animations
+    final walkAnimation = SpriteAnimation.spriteList(
+      [Sprite(walk1), Sprite(walk2)],
+      stepTime: 0.15, // Time between frames for walking
+      loop: true,
+    );
+
+    final leftTurnAnimation = SpriteAnimation.fromFrameData(
+      leftTurn,
+      SpriteAnimationData.sequenced(
+        amount: 1,
+        stepTime: _turnDuration,
+        textureSize: Vector2.all(leftTurn.width.toDouble()), // Assuming square frames
+        loop: false,
+      ),
+    );
+
+    final rightTurnAnimation = SpriteAnimation.fromFrameData(
+      rightTurn,
+      SpriteAnimationData.sequenced(
+        amount: 1,
+        stepTime: _turnDuration,
+        textureSize: Vector2.all(rightTurn.width.toDouble()), // Assuming square frames
+        loop: false,
+      ),
+    );
+
+    // Set all available animations
+    animations = {
+      CharacterState.walk: walkAnimation,
+      CharacterState.left: leftTurnAnimation,
+      CharacterState.right: rightTurnAnimation,
+    };
+
+    current = CharacterState.walk;
+  }
+
+  void turnLeft() {
+    if (current == CharacterState.left) return; // Prevent restart if already turning left
+    current = CharacterState.left;
+    _animationTimeLeft = _turnDuration;
+  }
+
+  void turnRight() {
+    if (current == CharacterState.right) return; // Prevent restart if already turning right
+    current = CharacterState.right;
+    _animationTimeLeft = _turnDuration;
+  }
+
+  void returnToWalk() {
+    if (current != CharacterState.walk) {
+      current = CharacterState.walk;
+      _animationTimeLeft = 0.0;
+    }
+  }
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+
+    if (_animationTimeLeft > 0) {
+      _animationTimeLeft -= dt;
+      if (_animationTimeLeft <= 0) {
+        returnToWalk();
+      }
+    }
+  }
+}
+
+enum CharacterState {
+  walk,
+  left,
+  right,
+}
+
+
 // ----------------------------------
-// --- Flame Game Classes (Unchanged) ---
+// --- Flame Game Classes (Updated) ---
 // ----------------------------------
 
 class CharacterGame extends FlameGame {
@@ -446,7 +556,7 @@ class CharacterGame extends FlameGame {
     required this.onScoreChange,
   });
 
-  SpriteComponent? character;
+  Character? character;
   final List<_ObstacleBush> bushes = [];
   List<_Tree> trees = [];
 
@@ -459,7 +569,6 @@ class CharacterGame extends FlameGame {
 
   double _targetX = 0.0;
   final double _moveSpeed = 900.0;
-  // MODIFIED: Reduced speed for a less frantic game
   final double _bushSpeed = 150.0;
   double _canvasHeight = 0.0;
 
@@ -468,12 +577,10 @@ class CharacterGame extends FlameGame {
 
   int _currentQuestionIndex = 0;
   int _score = 0;
-  // This is the index (0, 1, or 2) of the CORRECT answer lane for the current question
   int _correctLaneIndex = 0;
 
   Question get currentQuestion => questions[_currentQuestionIndex];
 
-  // A mapping from Lane Index (0, 1, 2) to Option Key ('A', 'B', 'C')
   static const Map<int, String> _laneIndexToKey = {
     0: 'A',
     1: 'B',
@@ -488,16 +595,15 @@ class CharacterGame extends FlameGame {
     add(bg!);
 
     // Character
-    final image = await images.load('character.png'); // Placeholder, ensure asset exists
-    character = SpriteComponent(
-      sprite: Sprite(image),
-      size: Vector2(85, 85),
-      anchor: Anchor.bottomCenter,
+    character = Character(
+      size: Vector2(100, 100),
+      position: Vector2(0, 0), // Will be set correctly in _updatePositions
+      speed: _moveSpeed,
     );
     add(character!);
 
     // Bushes (Obstacles)
-    final bushImage = await images.load('bush.png'); // Placeholder, ensure asset exists
+    final bushImage = await Flame.images.load('bush.png');
     final bushSprite = Sprite(bushImage);
     for (int i = 0; i < 3; i++) {
       final bush = _ObstacleBush(
@@ -510,9 +616,8 @@ class CharacterGame extends FlameGame {
     }
 
     // Trees (Decorative)
-    // NOTE: This section assumes assets 'tree1.png' through 'tree6.png' exist
     for (int i = 1; i <= 6; i++) {
-      final img = await images.load('tree$i.png');
+      final img = await Flame.images.load('tree$i.png'); // FIX: Use Flame.images
       final treeSprite = Sprite(img);
       final bool leftSide = _random.nextBool();
       final double xPos = leftSide ? size.x * 0.05 : size.x * 0.95;
@@ -595,12 +700,18 @@ class CharacterGame extends FlameGame {
   void moveLeft() {
     if (_isGameOver) return;
     final newIndex = (_posIndex - 1).clamp(0, 2);
+    if (newIndex != _posIndex) {
+      character?.turnLeft(); // Trigger the left turn animation
+    }
     _moveToIndex(newIndex);
   }
 
   void moveRight() {
     if (_isGameOver) return;
     final newIndex = (_posIndex + 1).clamp(0, 2);
+    if (newIndex != _posIndex) {
+      character?.turnRight(); // Trigger the right turn animation
+    }
     _moveToIndex(newIndex);
   }
 
@@ -610,10 +721,8 @@ class CharacterGame extends FlameGame {
     _targetX = _xForIndex(newIndex);
   }
 
-  bool _checkCollision(SpriteComponent obj1, SpriteComponent obj2) {
-    final rect1 = obj1.toRect();
-    final rect2 = obj2.toRect();
-    return rect1.overlaps(rect2);
+  bool _checkCollision(PositionComponent obj1, PositionComponent obj2) {
+    return obj1.toRect().overlaps(obj2.toRect());
   }
 
   void _setupNextQuestion() {
@@ -661,6 +770,10 @@ class CharacterGame extends FlameGame {
         character!.position = Vector2(newX, pos.y);
       } else {
         character!.position = Vector2(_targetX, pos.y);
+        // Ensure character returns to walking animation once movement is complete
+        if(character?.current != CharacterState.walk) {
+          character?.returnToWalk();
+        }
       }
     }
 
@@ -727,19 +840,17 @@ class _ObstacleBush extends SpriteComponent {
     required this.bushIndex,
   }) : super(sprite: sprite, size: size, anchor: Anchor.bottomCenter);
 
-  // Custom update to change color based on correct/wrong for visual debugging/feedback
   @override
   void render(Canvas canvas) {
     super.render(canvas);
+    // Draw visual feedback borders for debugging/visual aid
     if (isCorrectOption) {
-      // Draw a RED border for the correct answer (AVOID)
       final Paint correctPaint = Paint()
         ..color = Colors.redAccent
         ..style = PaintingStyle.stroke
         ..strokeWidth = 5.0;
       canvas.drawRect(toRect(), correctPaint);
     } else {
-      // Draw a GREEN border for the wrong answers (SAFE/COLLECT)
       final Paint wrongPaint = Paint()
         ..color = Colors.green
         ..style = PaintingStyle.stroke
@@ -763,7 +874,7 @@ class _ScrollingBackground extends Component with HasGameRef<CharacterGame> {
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    // NOTE: This assumes 'bg3.png' asset exists
+    // Use gameRef.images or Flame.images
     final bgImage = await gameRef.images.load('bg3.png');
     bgSprite = Sprite(bgImage);
 
