@@ -90,11 +90,94 @@ class MyApp extends StatelessWidget {
         scaffoldBackgroundColor: Colors.black, // Dark background
         cardColor: Colors.grey[900], // Darker card background
       ),
-      // Pass the globally loaded questions list to GameScreen
-      home: GameScreen(questions: _loadedQuestions),
+      // NEW: Start with the StartScreen
+      home: StartScreen(questions: _loadedQuestions),
     );
   }
 }
+
+// ----------------------------------
+// --- NEW: Start Screen Class ---
+// ----------------------------------
+class StartScreen extends StatelessWidget {
+  final List<Question> questions;
+  const StartScreen({super.key, required this.questions});
+
+  @override
+  Widget build(BuildContext context) {
+    // Add a check to handle the case where questions failed to load
+    if (questions.isEmpty) {
+      return const Scaffold(
+        body: Center(
+          child: Text('Error: Could not load quiz questions.',
+              style: TextStyle(color: Colors.red)),
+        ),
+      );
+    }
+
+    return Scaffold(
+      body: Container(
+        decoration: const BoxDecoration(
+          image: DecorationImage(
+            // NOTE: Assumes you have a background image for the start screen, e.g., 'assets/images/bg3.png'
+            image: AssetImage('assets/images/bg3.png'),
+            fit: BoxFit.cover,
+            opacity: 0.5, // Make it subtle
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text(
+                'Vocabulary Runner Quiz',
+                style: TextStyle(
+                  fontSize: 36,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                  shadows: [
+                    Shadow(blurRadius: 10.0, color: Colors.greenAccent),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 50),
+              SizedBox(
+                width: 250,
+                height: 60,
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    // Navigate to the GameScreen and replace the StartScreen in the navigation stack
+                    Navigator.of(context).pushReplacement(
+                      MaterialPageRoute(
+                        builder: (context) => GameScreen(questions: questions),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.play_arrow, size: 30),
+                  label: const Text(
+                    'START GAME',
+                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green, // Button color
+                    foregroundColor: Colors.white, // Text color
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ----------------------------------
+// --- Game Screen and UI Classes (Mostly Unchanged) ---
+// ----------------------------------
 
 class GameScreen extends StatefulWidget {
   final List<Question> questions; // Accept questions as a parameter
@@ -218,11 +301,28 @@ class _GameScreenState extends State<GameScreen> {
                   }
                 });
                 // FIX: Start the background music again after pressing restart
-                FlameAudio.bgm.play('BG.mp3');
+                // MODIFICATION: Reduce volume for BGM
+                FlameAudio.bgm.play('BG.mp3', volume: 0.3);
               });
               _focusNode.requestFocus();
             },
             child: const Text('Restart'),
+          ),
+          // NEW: Button to go back to the Start Screen
+          TextButton(
+            onPressed: () {
+              // Stop the game engine and music before navigating back
+              _game.pauseEngine();
+              FlameAudio.bgm.stop();
+
+              Navigator.of(context).pop(); // Dismiss dialog
+              Navigator.of(context).pushReplacement( // Go back to StartScreen
+                MaterialPageRoute(
+                  builder: (context) => StartScreen(questions: widget.questions),
+                ),
+              );
+            },
+            child: const Text('Main Menu'),
           ),
         ],
       ),
@@ -641,8 +741,8 @@ class CharacterGame extends FlameGame {
     // NEW: Initialize the BGM manager
     await FlameAudio.bgm.initialize();
 
-    // NEW: Load the music asset for pre-caching
-    await FlameAudio.audioCache.loadAll(['BG.mp3', 'Kill_sound.mp3']);
+    // MODIFIED: Load the music and all required audio assets
+    await FlameAudio.audioCache.loadAll(['BG.mp3', 'Kill_sound.mp3', 'Hiss.mp3']);
 
     // Ensure the CoinAnimationGame also loads its assets
     await coinAnimationGame.onLoad();
@@ -717,7 +817,8 @@ class CharacterGame extends FlameGame {
     }
 
     // FIX: Start the background music loop using the BGM manager
-    FlameAudio.bgm.play('BG.mp3');
+    // MODIFICATION: Reduce volume for BGM
+    FlameAudio.bgm.play('BG.mp3', volume: 0.3);
   }
 
   @override
@@ -875,6 +976,8 @@ class CharacterGame extends FlameGame {
           // Logic for sprite change
           if (!bush.isCorrectOption && !bush.isSnake) {
             bush.turnToSnake();
+            // NEW: Play Hiss.mp3 when the bush transforms into a snake for the first time
+            FlameAudio.play('Hiss.mp3');
           }
         } else if (bushY > charY) {
           // If the bush has passed the character, reset snake state (if it was a wrong option)
@@ -895,7 +998,8 @@ class CharacterGame extends FlameGame {
               FlameAudio.bgm.stop();
 
               // NEW: Play the kill sound
-              FlameAudio.play('Kill_sound.mp3');
+              // MODIFICATION: Reduce volume for Kill_sound.mp3
+              FlameAudio.play('Kill_sound.mp3', volume: 0.0);
 
               onGameOver();
               return;
