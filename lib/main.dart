@@ -694,6 +694,7 @@ class CharacterGame extends FlameGame {
   Character? character;
   final List<_ObstacleBush> bushes = [];
   List<_Tree> trees = [];
+  List<_Flower> flowers = []; // List to hold flower components
 
   _ScrollingBackground? bg;
 
@@ -715,11 +716,15 @@ class CharacterGame extends FlameGame {
   int _score = 0;
   int _correctLaneIndex = 0;
 
-  // NEW: Sprites for the bushes
+  // Sprites for the bushes
   late Sprite _normalBushSprite;
   late Sprite _snakeBushSprite;
 
-  // NEW: Character collision window for sprite change
+  // Sprites for the flowers
+  late Sprite _flower1Sprite;
+  late Sprite _flower2Sprite;
+
+  // Character collision window for sprite change
   // Transformation starts when bush is this far *above* the character's feet
   static const double _bushTransformStartOffset = 50.0;
   // Transformation ends when bush is this far *below* the character's feet
@@ -738,10 +743,10 @@ class CharacterGame extends FlameGame {
   Future<void> onLoad() async {
     await super.onLoad();
 
-    // NEW: Initialize the BGM manager
+    // Initialize the BGM manager
     await FlameAudio.bgm.initialize();
 
-    // MODIFIED: Load the music and all required audio assets
+    // Load the music and all required audio assets
     await FlameAudio.audioCache.loadAll(['BG.mp3', 'Kill_sound.mp3', 'Hiss.mp3']);
 
     // Ensure the CoinAnimationGame also loads its assets
@@ -752,6 +757,11 @@ class CharacterGame extends FlameGame {
     // NOTE: Ensure 'assets/images/bush.png' and 'assets/images/bush_snake.png' exist
     _normalBushSprite = Sprite(await images.load('bush.png'));
     _snakeBushSprite = Sprite(await images.load('bush_snake.png'));
+
+    // Load flower images
+    // NOTE: Ensure 'assets/images/flower1.png' and 'assets/images/flower2.png' exist
+    _flower1Sprite = Sprite(await images.load('flower1.png'));
+    _flower2Sprite = Sprite(await images.load('flower2.png'));
 
     bg = _ScrollingBackground(speedProvider: () => _bushSpeed);
     add(bg!);
@@ -782,6 +792,7 @@ class CharacterGame extends FlameGame {
       final img = await images.load('tree$i.png');
       final treeSprite = Sprite(img);
       final bool leftSide = _random.nextBool();
+      // Trees are placed far to the side (5% and 95% of screen width)
       final double xPos = leftSide ? size.x * 0.05 : size.x * 0.95;
       final double yPos = -_random.nextDouble() * size.y;
 
@@ -797,10 +808,34 @@ class CharacterGame extends FlameGame {
       add(tree);
     }
 
+    // MODIFIED: Flowers (Decorative)
+    for (int i = 0; i < 4; i++) { // Add a few flowers
+      final flowerSprite = _random.nextBool() ? _flower1Sprite : _flower2Sprite;
+      final bool leftSide = _random.nextBool();
+
+      // POSITION ADJUSTMENT: Placing the flowers in the desired inner side lanes (36% and 65% of screen width)
+      final double xPos = leftSide ? size.x * 0.36 : size.x * 0.65; // <--- ADJUSTED INITIAL PLACEMENT
+      final double yPos = -_random.nextDouble() * size.y; // Start off-screen
+
+      final flower = _Flower(
+        sprite: flowerSprite,
+        position: Vector2(xPos, yPos),
+        size: Vector2(80, 80), // Smaller size for flowers
+        speedProvider: () => _bushSpeed,
+        canvasHeight: size.y,
+      );
+      flowers.add(flower);
+      add(flower);
+    }
+
+
     // Drawing order
     if (bg != null) bg!.priority = -2;
     for (final tree in trees) {
       tree.priority = 0;
+    }
+    for (final flower in flowers) {
+      flower.priority = 0; // Flowers are on the same layer as trees
     }
     for (final bush in bushes) {
       bush.priority = 1;
@@ -835,6 +870,10 @@ class CharacterGame extends FlameGame {
 
     for (final tree in trees) {
       tree.canvasHeight = canvasSize.y;
+    }
+    // Update canvas height for flowers
+    for (final flower in flowers) {
+      flower.canvasHeight = canvasSize.y;
     }
   }
 
@@ -1177,11 +1216,51 @@ class _Tree extends SpriteComponent with HasGameRef<CharacterGame> {
     final speed = speedProvider();
     position.y += speed * dt;
 
+    // Reset position when off-screen
     if (position.y > canvasHeight + 200) {
       position.y = -_random.nextDouble() * canvasHeight;
-      final bool newLeft = _random.nextBool();
+      // Keep tree on its assigned side (for consistency, though tree logic allows for random side switching)
       final double canvasWidth = gameRef.size.x > 0 ? gameRef.size.x : 1.0;
-      position.x = newLeft ? canvasWidth * 0.05 : canvasWidth * 0.95;
+      position.x = isLeft ? canvasWidth * 0.05 : canvasWidth * 0.95;
+      // Reset to a new random sprite if you had multiple tree sprites to cycle through
+    }
+  }
+}
+
+// MODIFIED: Decorative Flower Component
+class _Flower extends SpriteComponent with HasGameRef<CharacterGame> {
+  final double Function() speedProvider;
+  double canvasHeight;
+  final Random _random = Random();
+
+  _Flower({
+    required Sprite sprite,
+    required Vector2 position,
+    required Vector2 size,
+    required this.speedProvider,
+    required this.canvasHeight,
+  }) : super(sprite: sprite, position: position, size: size, anchor: Anchor.bottomCenter);
+
+  @override
+  void update(double dt) {
+    super.update(dt);
+    final speed = speedProvider();
+    position.y += speed * dt;
+
+    // Reset position when off-screen
+    if (position.y > canvasHeight + 200) {
+      position.y = -_random.nextDouble() * canvasHeight;
+
+      // Randomly pick the side (left or right)
+      final bool newLeft = _random.nextBool();
+      final double canvasWidth = gameRef.size.x > 0 ? gameRef.size.x : 2.0;
+
+      // POSITION ADJUSTMENT: Flowers are restricted to the inner side lanes (36% and 65% of screen width)
+      // This is the line that implements the desired restriction.
+      position.x = newLeft ? canvasWidth * 0.36 : canvasWidth * 0.65;
+
+      // Randomly pick a flower sprite (if you want it to cycle between flower1.png and flower2.png)
+      sprite = _random.nextBool() ? gameRef._flower1Sprite : gameRef._flower2Sprite;
     }
   }
 }
